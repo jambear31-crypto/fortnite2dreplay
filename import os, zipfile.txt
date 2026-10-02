@@ -1,0 +1,132 @@
+import os, zipfile
+
+base = "/mnt/data/fortnite_replay_backend"
+os.makedirs(base, exist_ok=True)
+
+files = {
+    "package.json": """{
+  "name": "fortnite-replay-viewer-backend",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Starter API for a Fortnite replay viewer",
+  "main": "server.js",
+  "scripts": { "start": "node server.js" },
+  "engines": { "node": ">=18" }
+}
+""",
+    "server.js": """const http = require("node:http");
+const { URL } = require("node:url");
+
+const PORT = Number(process.env.PORT || 3000);
+const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN || "*";
+const MAX_BODY_BYTES = 16 * 1024;
+
+function send(res, status, payload) {
+  const body = JSON.stringify(payload);
+  res.writeHead(status, {
+    "Content-Type": "application/json; charset=utf-8",
+    "Content-Length": Buffer.byteLength(body),
+    "Cache-Control": "no-store"
+  });
+  res.end(body);
+}
+
+function setCors(req, res) {
+  const origin = req.headers.origin;
+  if (ALLOWED_ORIGIN === "*" || origin === ALLOWED_ORIGIN) {
+    res.setHeader("Access-Control-Allow-Origin", ALLOWED_ORIGIN === "*" ? "*" : origin);
+  }
+  res.setHeader("Vary", "Origin");
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+}
+
+function readJson(req) {
+  return new Promise((resolve, reject) => {
+    let raw = "";
+    let size = 0;
+    req.on("data", chunk => {
+      size += chunk.length;
+      if (size > MAX_BODY_BYTES) {
+        reject(Object.assign(new Error("Request body too large"), { status: 413 }));
+        req.destroy();
+        return;
+      }
+      raw += chunk;
+    });
+    req.on("end", () => {
+      try { resolve(raw ? JSON.parse(raw) : {}); }
+      catch { reject(Object.assign(new Error("Request body must be valid JSON"), { status: 400 })); }
+    });
+    req.on("error", reject);
+  });
+}
+
+const server = http.createServer(async (req, res) => {
+  setCors(req, res);
+  if (req.method === "OPTIONS") {
+    res.writeHead(204);
+    return res.end();
+  }
+
+  const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
+
+  if (req.method === "GET" && url.pathname === "/") {
+    return send(res, 200, {
+      name: "Fortnite Replay Viewer API",
+      status: "online",
+      endpoints: ["/health", "/api/replays/import"]
+    });
+  }
+
+  if (req.method === "GET" && url.pathname === "/health") {
+    return send(res, 200, { ok: true, service: "replay-viewer-backend" });
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/replays/import") {
+    let data;
+    try { data = await readJson(req); }
+    catch (err) { return send(res, err.status || 400, { error: err.message || "Could not read request" }); }
+
+    const code = String(data.code || "").trim();
+    if (!/^[a-fA-F0-9]{32}$/.test(code)) {
+      return send(res, 400, { error: "Replay code must be exactly 32 hexadecimal characters." });
+    }
+
+    // Placeholder: a supported replay provider/parser must be connected here.
+    return send(res, 501, {
+      error: "Replay import is not configured yet.",
+      detail: "The API is online, but no replay provider/parser is connected."
+    });
+  }
+
+  return send(res, 404, { error: "Endpoint not found" });
+});
+
+server.listen(PORT, "0.0.0.0", () => {
+  console.log(`Replay viewer backend listening on port ${PORT}`);
+});
+""",
+    ".gitignore": "node_modules/\n.env\n.DS_Store\n",
+    ".env.example": """# Set this to your deployed frontend's exact origin after deployment.
+# Example: https://your-replay-viewer.pages.dev
+ALLOWED_ORIGIN=*
+# Render supplies PORT automatically; locally the server defaults to 3000.
+""",
+    "README.md": """# Fortnite Replay Viewer Backend — Starter
+
+A minimal Node.js API for deployment to Render or local testing.
+
+## Included
+- `GET /` — service information
+- `GET /health` — health check
+- `POST /api/replays/import` — validates a 32-character hexadecimal replay code
+
+## Important
+This starter does **not** retrieve or decode Fortnite replay data yet. A compatible replay provider/parser must be integrated. The import endpoint intentionally returns HTTP 501 until that is configured.
+
+## Run locally
+Requires Node.js 18 or newer.
+
+```bash
+npm start
